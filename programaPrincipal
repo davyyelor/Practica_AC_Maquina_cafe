@@ -1,0 +1,681 @@
+Evento EQU R6
+Estado EQU R2
+GranoCafe EQU P3.2
+GranoDescafeinado EQU P3.7
+LlenarAgua EQU P0.7
+Calentar EQU P2.7
+ServirCafe EQU P3.3
+PonerVaso EQU P1.3
+LlenoAgua EQU P3.0
+Vaso EQU P3.1
+ServirLeche EQU P3.6
+EntradaCincoCent EQU P1.0
+EntradaDiezCent EQU P1.1
+EntradaVeinteCent EQU P1.2
+Sel0 EQU P1.5
+Sel1 EQU P1.6
+Sel2 EQU P1.7
+PrimeraVezVaso EQU 0x20.0
+TickADC EQU 0x20.1
+TickTiempo EQU 0X20.2
+TargetPeso EQU 0x21
+TargetTemp EQU 0x23
+TargetTiempo EQU 0x24
+PWMP EQU 0XFE
+PWM0 EQU 0XFC
+CONTSW EQU 0X22
+TipoCafe EQU 0x25
+Dinero EQU 0x26
+
+ORG 0X0B
+	ACALL TimerInt
+	RETI
+
+ORG 0X0053
+	MOV 0XC5,#00000000b
+	SETB TickADC
+	RETI
+
+ORG 0X00
+	AJMP PPRINCIPAL
+
+
+ORG 0X7B
+
+PPRINCIPAL:
+	ACALL INICIALIZACIONES
+BUCLE:
+	ACALL MAQUEST
+	AJMP BUCLE
+
+INICIALIZACIONES:
+	MOV Estado,#0x00		;Estado inicial 0
+	MOV Dinero,#0x00		;Dinero inicial 0
+	MOV TargetPeso, #0xC6		;Cantidad de cafe necesaria 
+	MOV TargetTemp, #0xE7		;Temperatura del agua para hacer cafe
+	MOV P0, #0x00			;Ponemos a 0 el valor de todos los puertos para no activar ninguna salida ni entrada
+	MOV P1, #0x00	
+	MOV P2, #0x00
+	MOV P3, #0x00
+	RET
+
+;***********MAQUINA DE ESTADOS***********
+MAQUEST:				
+	MOV A, Estado			;Se mueve al acumulador el estado al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL
+	JMP @A + DPTR			;Se salta al estado correspondiente teniendo en cuenta la tabla
+JMP_TBL:
+	AJMP ESPERA			;Estado 0
+	AJMP COLOCACIONVASO		;Estado 1
+	AJMP CARGACAFE			;Estado 2
+	AJMP MOLIDO			;Estado 3
+	AJMP CARGAAGUA			;Estado 4
+	AJMP CALENTAMIENTOAGUA		;Estado 5
+	AJMP SERVICIOCAFE		;Estado 6
+	AJMP SERVICIOLECHE		;Estado 7
+	AJMP FINPROCESO			;Estado 8
+
+
+;*******Estado 0: ESPERA*************
+ESPERA:
+	ACALL GENEVENESTADO0		;Llamada al generador de eventos
+	MOV A, Evento			;Se mueve el numero de evento al acumulador
+	RL A
+	MOV DPTR,#JMP_TBL_EST0
+	JMP @A + DPTR			;Se salta al evento correspondiente
+JMP_TBL_EST0:
+	AJMP E0_EVENTO0
+	AJMP E0_EVENTO1
+	AJMP E0_EVENTO2
+	
+GENEVENESTADO0:						;Generador de eventos
+	JB EntradaCincoCent, SETESTADO0EVENTO1		;Se comprueba la introducción de monedas
+	JB EntradaDiezCent, SETESTADO0EVENTO1
+	JB EntradaVeinteCent, SETESTADO0EVENTO1
+	JB Sel0, SETESTADO0EVENTO0O2			;Se comprueba la selección de bebidas
+	JB Sel1, SETESTADO0EVENTO0O2
+	JB Sel2, SETESTADO0EVENTO0O2
+	MOV Evento, #0x00				;No introducción, no selección --> Evento 0
+	RET
+SETESTADO0EVENTO1:					;Introducción moneda --> Evento 1
+	MOV Evento, #0x01
+	RET
+SETESTADO0EVENTO0O2:					;Se comprueba que bebida se ha seleccionado
+	JNB Sel0, SELBIT1
+	SETB TipoCafe.0
+	CLR Sel0
+SELBIT1:
+	JNB Sel1, SELBIT2
+	SETB TipoCafe.1
+	CLR Sel1
+SELBIT2:
+	JNB Sel2, NOBIT2
+	SETB TipoCafe.2
+	CLR Sel2
+NOBIT2:
+	MOV A, TipoCafe
+	ACALL SUBRUTINA_PRECIO				;Se pide el precio a una subrutina
+	CJNE A, Dinero, INSUFICIENTEOSOBRA		;Se comprueba si hay saldo suficiente
+	MOV Evento, #0x02				;Saldo suficiente --> Evento 2
+	RET
+INSUFICIENTEOSOBRA:
+	JNC INSUFICIENTE
+	MOV Evento, #0x02				;Saldo suficiente --> Evento 2
+	RET
+INSUFICIENTE:						;Saldo insuficiente --> Evento 0					
+	MOV Evento, #0x00
+	RET
+
+E0_EVENTO0:						;Evento 0
+	RET
+
+E0_EVENTO1:						;Evento 1:Intro moneda
+	JBC P1.0, CINCOCENT				;Se comprueba que moneda se ha introducido
+	JBC P1.1, DIEZCENT				
+	MOV A, Dinero					
+	ADD A, #0x14					;Se suma el valor de la moneda al dinero
+	MOV Dinero, A
+	ACALL BCD_7SEG_DINERO_1				;Se visualiza el dinero en la pantalla
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	MOV A, Dinero
+	ACALL BCD_7SEG_DINERO_2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_1
+	CLR P1.2
+	RET
+CINCOCENT:
+	MOV A, Dinero
+	ADD A, #0x05					;Se suma el valor de la moneda al dinero
+	MOV Dinero, A
+	ACALL BCD_7SEG_DINERO_1				;Se visualiza el dinero en la pantalla
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	MOV A, Dinero
+	ACALL BCD_7SEG_DINERO_2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_1
+	RET	
+DIEZCENT:
+	MOV A, Dinero
+	ADD A, #0x0A					;Se suma el valor de la moneda al dinero
+	MOV Dinero, A
+	ACALL BCD_7SEG_DINERO_1				;Se visualiza el dinero en la pantalla
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	MOV A, Dinero
+	ACALL BCD_7SEG_DINERO_2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_1
+	RET
+
+E0_EVENTO2:						;Evento 2: Selección bebida y dinero suficiente
+	MOV A, TipoCafe
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS			;Se visualiza el numero de la bebida en display 1
+	ACALL VISUALIZAR_DISPLAY_1
+	MOV A, #0X07					;Se visualiza la "cuenta regresiva" del proceso en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	MOV Estado, #0x01				;Se pasa al siguiente estado
+	SETB PrimeraVezVaso				;Se activa este bit para el caso en el que en el siguiente estado
+	RET						;no se detecte vaso,saber que es la primera vez que esto pasa
+
+
+;*******Estado 1: COLOCACION VASO*************
+COLOCACIONVASO:
+	ACALL GENEVENESTADO1				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A			
+	MOV DPTR,#JMP_TBL_EST1				;Se salta al evento correspondiente
+	JMP @A + DPTR
+JMP_TBL_EST1:
+	AJMP E1_EVENTO0
+	AJMP E1_EVENTO1
+	AJMP E1_EVENTO2
+	
+GENEVENESTADO1:						;Generador de eventos
+	JNB Vaso, SETESTADO1EVENTO1o0			;Se comprueba la presencia de vaso
+	MOV Evento, #0x02				;Vaso presente --> Evento 2
+	RET
+SETESTADO1EVENTO1o0:					;Vaso no presente
+	JBC PrimeraVezVaso, SETESTADO1EVENTO1		;Se comprueba si es la primera vez que no se detecta
+	MOV Evento, #0x00				;No es la primera vez --> Evento 0
+	RET
+SETESTADO1EVENTO1:					;Es la primera vez -->Evento 1 (en el salto se hace CLR PrimeraVezVaso)
+	MOV Evento, #0x01
+	RET
+
+
+E1_EVENTO0:						;Evento 0
+	RET
+
+E1_EVENTO1:						;Evento 1: Primera vez que no se detecta vaso
+	SETB PonerVaso					;Mandar poner vaso
+	RET
+
+E1_EVENTO2:						;Evento 2: Vaso presente			
+	ACALL ConfigurarADCCargaCafe			;Configurar el ADC para pesarel cafe
+	ACALL IniciarCargaCafe				;Iniciar la carga de cafe
+	MOV Estado, #0x02				;Moverse al estado 2
+	CLR PonerVaso					;Parar PonerVaso (para el caso en el que estuviera activo)
+	MOV A, #0x06					;Decrementar cuenta regresiva en display2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+
+IniciarCargaCafe:					
+	MOV A, TipoCafe					;Mover el tipo de cafe al acumulador
+	JB 0xE2,Descafeinado				;Comprobar si es con o sin cafeina (saltar en el ultimo caso)
+	SETB GranoCafe					;Encender la carga de cafe (con cafeina)
+	RET
+Descafeinado:
+	SETB GranoDescafeinado				;Encender la carga de cafe (descaeinado)
+	RET
+	
+ConfigurarADCCargaCafe:
+	MOV 0XC5,#00001000b				;Configurar ADCON para iniciar conversion del dato del canal 0
+	SETB 0xA8.7					;Global interrupt		
+	SETB 0xA8.6					;ADC interrupt	
+	RET
+
+;*******Estado 2: CARGA CAFE*************
+CARGACAFE:
+	ACALL GENEVENESTADO2				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL_EST2
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST2:
+	AJMP E2_EVENTO0
+	AJMP E2_EVENTO1
+	AJMP E2_EVENTO2
+	RET
+
+GENEVENESTADO2:						;Generador de eventos
+	JBC TickADC, SETESTADO2EVENTO1O2		;Se comprueba si el TickADC esta activo (si ha terminado la conversión)
+	MOV Evento, #0x00				;TickADC no activo --> Evento 0
+	RET
+SETESTADO2EVENTO1O2:					;Tick ADC activo
+	MOV A, 0XC6					;Se mueve el contenido de la conversión al acumulador (ADCH) (solo los 8 bits MSB)		
+	CJNE A, TargetPeso, PESOMAYOROMENOR		;Se comprueba si el peso es igual al objetivo, se salta a si no lo es
+	MOV Evento, #0x02				;Peso igual al objetivo --> Evento 2
+	RET
+PESOMAYOROMENOR:					;Peso desigual
+	JC SETESTADO2EVENTO1				;Carry activo --> dato de conversion < target --> salto
+	MOV Evento, #0x02				;Carry no activo --> dato de conversion > target --> Evento 2
+	RET
+SETESTADO2EVENTO1:					;dato de conversion < target --> Evento 1
+	MOV Evento, #0x01
+	RET
+
+E2_EVENTO0:						;Evento 0
+	RET
+
+E2_EVENTO1:						;Evento 1: dato de conversion < target
+	MOV 0XC5,#00001000b				;Pedir otro dato	
+	RET
+
+E2_EVENTO2:						;Evento 2:dato de conversion >= target
+	ACALL Pararcargacafe				;Parar la carga de cafe
+	ACALL Iniciarmolido				;Iniciar el molido de cafe
+	MOV TargetTiempo, #0x78				;120d para contar 120 overflows (3s)
+	ACALL Configurarreloj0				;Configurar el reloj
+	MOV Estado, #0x03				;Morverse al estado 3
+	MOV A, #0x05					;Decrementar la cuenta regresiva y visualizar en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+Pararcargacafe:
+	CLR GranoCafe					;Parar carga cafe (con cafeina)
+	CLR GranoDescafeinado				;Parar carga cafe (descafeinado)
+	RET
+
+Iniciarmolido:						;Configurar la salida PWM con los valores deseados
+	MOV PWMP, #0X01					;PWMP = 0x01 para conseguir la mitar de la frecuencia maxima
+	MOV PWM0, #0XB3					;PWMP0 = 0xB3 para conseguir un 30% del duty-cycle
+	RET
+
+;*******Estado 3: MOLIDO*************
+MOLIDO:
+	ACALL GENEVENESTADO3				;Llamada al generador de eventos	
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL_EST3
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST3:
+	AJMP E3_EVENTO0
+	AJMP E3_EVENTO1
+	RET	
+
+GENEVENESTADO3:						;Generador de eventos
+	JBC TickTiempo, SETESTADO3EVENTO1		;Se comprueba si ha pasado el tiempo correspondiente, se salta si es asi (haciendo clearr)
+	MOV Evento, #0x00				;No ha pasado el tiempo --> Evento 0
+	RET
+SETESTADO3EVENTO1:					;Ha pasado el tiempo --> Evento 1
+	MOV Evento, #0x01
+	RET
+
+E3_EVENTO0:						;Evento 0
+	RET
+
+E3_EVENTO1:						;Evento 1: Tiempo de molido cumplido
+	MOV PWM0, #0x00 				;Parar molino
+        SETB LlenarAgua					;Iniciar el llenado de agua
+	MOV Estado, #0x04				;Moverse al estado 4
+	MOV A, #0x04					;Decrementar la cuenta regresiva y visualizar en el display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+;*******Estado 4: CARGA AGUA*************
+CARGAAGUA:
+	ACALL GENEVENESTADO4				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL_EST4
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST4:
+	AJMP E4_EVENTO0
+	AJMP E4_EVENTO1
+	RET
+
+GENEVENESTADO4:						;Generadorde eventos 
+	JBC LlenoAgua,SETESTADO4EVENTO1			;Se comprueba el sensor de llenado y se salta si es asi (haciendo clear)
+	MOV Evento, #0x00				;Sensor de llenado no activo --> Evento 0
+	RET
+SETESTADO4EVENTO1:					;Sensor de llenado activo --> Evento 1
+	MOV Evento, #0x01			
+	RET
+
+E4_EVENTO0:						;Evento 0
+	RET
+
+E4_EVENTO1:						;Evento 1
+	CLR LlenarAgua					;Parar la carga de agua
+	SETB Calentar					;Iniciar el calentamiento del agua
+	ACALL ConfigurarADCTemperatura			;Configurar ADC
+	MOV Estado, #0x05				;Moverse al siguiente estado
+	MOV A, #0x03					;Decrementar cuenta regresiva y visualizar en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+ConfigurarADCTemperatura:
+	MOV 0XC5,#00001001b				;Configurar ADCON para empezar una conversión del dato del canal 1
+	SETB 0xA8.7					;Global interrupt		
+	SETB 0xA8.6					;ADC interrupt
+	RET
+
+;*******Estado 5: CALENTAMIENTO AGUA*************
+CALENTAMIENTOAGUA:
+	ACALL GENEVENESTADO5				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL_EST5
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST5:
+	AJMP E5_EVENTO0				
+	AJMP E5_EVENTO1
+	AJMP E5_EVENTO2
+	RET
+	
+GENEVENESTADO5:						;Generador de eventos
+	JBC TickADC, SETESTADO5EVENTO1O2		;Se comprueba el TickADC para ver si la conversion ha terminado, se salta si es asi
+	MOV Evento, #0x00				;El TickADC no esta encendido, la conversion sigue en curso --> Evento 0
+	RET
+SETESTADO5EVENTO1O2:					;TickADC a 1, la conversión ha terminado
+	MOV A, 0XE6					;Se mueve el valor de la conversión (ADCH) al acumulador para compararlo
+	CJNE A, TargetTemp, TEMPMAYOROMENOR		;Se comprueba si la temperatura es igual al objetivo, se salta a si no lo es
+	MOV Evento, #0x02				;Temperatura igual al objetivo --> Evento 2
+	RET
+TEMPMAYOROMENOR:					;Temperatura diferente al objetivo
+	JC SETESTADO5EVENTO1				;Carry activo --> dato de conversion < target --> salto
+	MOV Evento, #0x02				;Carry no activo --> dato de conversion > target --> Evento 2
+	RET
+SETESTADO5EVENTO1:
+	MOV Evento, #0x01				;dato de conversion < target --> Evento 1
+	RET
+
+
+E5_EVENTO0:						;Evento 0
+	RET
+
+E5_EVENTO1:						;Evento 1: conversión finalizada dato de conversión < objetivo
+	MOV 0XC5,#00001001b				;Pedir otro dato
+	RET
+
+E5_EVENTO2:						;Evento 2: conversión finalizda dato de conversión >= objetivo
+	CLR Calentar					;Parar el calentamiento del agua
+	SETB ServirCafe					;Iniciar servicio cafe
+	MOV TargetTiempo, #0xA0 			;160d para contar 160 overflows (4s)
+	ACALL ConfigurarReloj0				;Configurar reloj
+	MOV Estado, #0x06				;Moverse al siguiente estado
+	MOV A, #0x02					;Decrementar la cuenta regresiva y visualizarla en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+;*******Estado 6: SERVICIO DE CAFE*************
+SERVICIOCAFE:
+	ACALL GENEVENESTADO6				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A 
+	MOV DPTR, #JMP_TBL_EST6
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST6:
+	AJMP E6_EVENTO0
+	AJMP E6_EVENTO1
+	AJMP E6_EVENTO2
+	RET
+
+GENEVENESTADO6:						;Generador de eventos
+	JBC TickTiempo, SETESTADO6EVENTO1o2		;Comprueba el TickTiempo, salta si es asi (haciencdo clear)
+	MOV Evento, #0x00				;TickTiempo no activo --> Estado 0
+	RET
+SETESTADO6EVENTO1o2:					;TickTiempo activo
+	MOV A, TipoCafe									
+	ACALL SUBRUTINA_LECHE				;Se pide el tiempo de servicio de leche
+	JNZ SETESTADO6EVENTO2				;Se comprueba si el tiempo de sericio de leche no es 0
+	MOV Evento, #0x01				;Tiempo de servicio de leche igual a 0 --> Evento 1
+	RET
+SETESTADO6EVENTO2:					;Tiempo de servicio de leche diferente de 0 --> Evento 2
+	MOV Evento, #0x02				
+	RET
+	
+E6_EVENTO0:						;Evento 0
+	RET
+
+E6_EVENTO1:						;Evento 1: Cafe solo
+	CLR ServirCafe					;Parar servicio cafe
+	MOV Estado, #0x08				;Moverse al estado 8
+	MOV A, #0x00					;Decrementar (por 2) cuenta regresiva y visualizar en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+E6_EVENTO2:						;Evento 2: Cafe con leche o cortado
+	CLR ServirCafe
+	MOV A, TipoCafe					
+	ACALL SUBRUTINA_LECHE				;Se pide el tiempo de duracion del servicio de leche (4s: con leche; 2s: cortado)
+	MOV TargetTiempo, A				
+	ACALL ConfigurarReloj0				;Se configura el reloj
+	SETB ServirLeche				;Se inicia el servicio de leche
+	MOV Estado, #0x07				;Moverse al estado 7
+	MOV A, #0x01					;Decrementar cuenta regresiva y visualizar en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+;*******Estado 7: SERVICIO LECHE*************
+SERVICIOLECHE:
+	ACALL GENEVENESTADO7				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A 
+	MOV DPTR, #JMP_TBL_EST7
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST7:
+	AJMP E7_EVENTO0
+	AJMP E7_EVENTO1
+	RET
+
+GENEVENESTADO7:						;Genreador de eventos
+	JBC TickTiempo, SETESTADO7EVENTO1		;Se comprueba el tickTiempo, y se salta si esta activo (haciendo clear)
+	MOV Evento, #0x00				;TickTiempo no activo --> Evento 0
+	RET
+SETESTADO7EVENTO1:					;TickTiempo activo --> Evento 1
+	MOV Evento, #0x01
+	RET
+
+E7_EVENTO0:						;Evento 0
+	RET
+
+E7_EVENTO1:						;Evento 1: Tiempo servicio leche terminado
+	CLR ServirLeche					;Parar servicio leche
+	MOV Estado, #0x08				;Moverse al siguiente estado
+	MOV A, #0x00					;Decrementar cuenta regresiva y visualizar en display 2
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_2
+	RET
+
+;*******Estado 8: FIN PROCESO*************
+FINPROCESO:
+	ACALL GENEVENESTADO8				;Llamada al generador de eventos
+	MOV A, Evento					;Se mueve al acumulador el evento al que hay que saltar
+	RL A
+	MOV DPTR,#JMP_TBL_EST8
+	JMP @A + DPTR					;Se salta al evento correspondiente
+JMP_TBL_EST8:
+	AJMP E8_EVENTO0
+	AJMP E8_EVENTO1
+	RET
+
+GENEVENESTADO8:						;Generador de eventos
+	JNB Vaso, SETESTADO8EVENTO1			;Se comprueba la presencia de vaso, se salta si no esta
+	MOV Evento, #0x00				;Vaso presente --> Evento 0
+	RET
+SETESTADO8EVENTO1:					;Vaso no presente --> Evento 1
+	MOV Evento, #0x01
+	RET
+
+E8_EVENTO0:						;Evento 0
+	RET
+
+E8_EVENTO1:						;Evento 1: Vaso no presente
+	MOV A, #0x00					;Visualizar 0 en display 1
+	ACALL SUBRUTINA_BCD_7_SEGMENTOS
+	ACALL VISUALIZAR_DISPLAY_1
+	MOV Estado, #0x00				;Moverse a estado 0
+	MOV Dinero, #0x00				;Resetear dinero
+	RET
+
+
+;******SUBRUTINAS*********
+SUBRUTINA_BCD_7_SEGMENTOS:				;Devuelve el valor en binario que han de tomar los puertos del 7 seg
+	INC A						;para representar un numero
+	MOVC A,@A+PC
+	RET
+	DB	01111110b ;0
+	DB	00110000b ;1
+	DB	01101101b ;2
+	DB	01111001b ;3
+	DB	00110011b ;4
+	DB	01011011b ;5
+	DB	00011111b ;6
+	DB	01110000b ;7
+	DB	01111111b ;8
+	DB	01110011b ;9
+	
+BCD_7SEG_DINERO_1:		;El display 2 solo tiene dos opciones a la hora de mostrar el dinero (0 o 5)
+	JB Dinero.0, Cinco
+	MOV A, #0x00
+	RET
+Cinco:
+	MOV A, #0x05
+	RET
+
+BCD_7SEG_DINERO_2:	;El display 1 muestra las decenas del precio por lo tanto si dividimos el precio entre 10 obtenemos dicho numero
+	MOV B, #0x0A
+	DIV AB
+	RET
+
+SUBRUTINA_LECHE:	;Devulve el numero de interrupciones por overflow que hay que contar via sw para conseguir el tiempo
+	INC A 
+	MOVC A,@A+PC	
+	RET
+	DB	0x00	;NADA
+	DB	0x10	;Cafe con leche
+	DB	0x08	;Cafe cortado
+	DB	0x00	;Cafe solo
+	DB	0x00	;NADA
+	DB	0x10	;Descafeinado con leche
+	DB	0x08	;Descafeinado cortado
+	DB	0x00	;Descafeinado solo
+
+SUBRUTINA_CAFEINA:
+	INC A 
+	MOVC A,@A+PC
+	RET
+	DB	0x00	;NADA
+	DB	0x01	;Cafe con leche
+	DB	0x01	;Cafe cortado
+	DB	0x01	;Cafe solo
+	DB	0x00	;NADA
+	DB	0x00	;Descafeinado con leche
+	DB	0x00	;Descafeinado cortado
+	DB	0x00	;Descafeinado solo
+
+SUBRUTINA_PRECIO:
+	INC A 
+	MOVC A,@A+PC
+	RET
+	DB	0x00	;NADA
+	DB	0x28	;Cafe con leche	40
+	DB	0x23	;Cafe cortado	35
+	DB	0x1E	;Cafe solo	30
+	DB	0x00	;NADA
+	DB	0x28	;Descafeinado con leche	40
+	DB	0x23	;Descafeinado cortado	35
+	DB	0x1E	;Descafeinado solo	30
+
+VISUALIZAR_DISPLAY_1:	;Bit menos significativo al Carry y se mueve el carry al bit del puerto correspondiente 
+	RRC A
+	MOV P0.6, C
+	RRC A
+	MOV P0.5, C
+	RRC A
+	MOV P0.4, C
+	RRC A
+	MOV P0.3, C
+	RRC A
+	MOV P0.2, C
+	RRC A
+	MOV P0.1, C
+	RRC A
+	MOV P0.0, C
+	RET
+
+VISUALIZAR_DISPLAY_2:
+	RRC A
+	MOV P2.6, C
+	RRC A
+	MOV P2.5, C
+	RRC A
+	MOV P2.4, C
+	RRC A
+	MOV P2.3, C
+	RRC A
+	MOV P2.2, C
+	RRC A
+	MOV P2.1, C
+	RRC A
+	MOV P2.0, C
+	RET
+
+TimerInt:
+	PUSH ACC
+	PUSH PSW
+	INC CONTSW
+	MOV A, CONTSW
+	SUBB A, TargetTiempo	;120d para contar 120 overflows y asi conseguir 3s
+	JZ cumpsegs
+	MOV TL0, #0XB0	;Precargar el contador del timer para contar 50000 pulsos
+	MOV TH0, #0X3C
+	POP PSW
+	POP ACC
+	RET
+cumpsegs:
+	SETB TickTiempo
+	CLR TCON.4
+	POP PSW
+	POP ACC
+	RET
+
+Configurarreloj0:
+	MOV TMOD, #0X01	;Timer 0 control interno 16bit
+	MOV TL0, #0XB0	;Precargar el contador del timer para contar 50000 pulsos
+	MOV TH0, #0X3C
+	SETB 0xA8.7	;Global interrupt
+	SETB 0xA8.1	;Timer 0 interrupt
+	MOV CONTSW, #0X00 ;Resetear contador_sw
+	SETB TCON.4	;Iniciar timer 0
+	RET
+
+
+END
+
+
+
+
+
+
+
+
+
+
+
+
+
+
